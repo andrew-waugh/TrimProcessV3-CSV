@@ -1,0 +1,8 @@
+http://prov.vic.gov.au/vers/schema/AGLS	http://www.w3.org/1999/02/22-rdf-syntax-ns
+ <aglsterms:protectiveMarking>Cabinet in Confidence</aglsterms:protectiveMarking>
+ <dcterms:publisher>State of Victoria</dcterms:publisher>
+ <dcterms:rightsHolder>State of Victoria 2016</dcterms:rightsHolder>
+ <aglsterms:function>Cabinet Document</aglsterms:function>
+ <versterms:disposalReviewDate>2020</versterms:disposalReviewDate>
+ <versterms:disposalAction>Transfer to PROV</versterms:disposalAction>
+ <versterms:disposalReference>PROS 99/110 Clause 8.1</versterms:disposalReference>

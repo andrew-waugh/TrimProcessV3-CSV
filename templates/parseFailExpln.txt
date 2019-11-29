@@ -1,0 +1,2 @@
+This part of the record is missing because the XML document in the TRIM export
+was malformed and could not be repaired or re-exported.
