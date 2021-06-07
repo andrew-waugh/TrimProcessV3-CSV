@@ -1,11 +1,10 @@
 package TrimProcessV3;
 
 /**
- *************************************************************
  *
- * T R I M P R O C E S S V 3
+ * T R I M P R O C E S S V 3 C S V
  *
- * This class processes an old (CVS) TRIM export and converts them into V3 VEOs.
+ * This class processes a CSV TRIM export and converts it into V3 VEOs.
  * <h3>Command Line arguments</h3>
  * The following command line arguments must be supplied:
  * <ul>
@@ -38,8 +37,6 @@ package TrimProcessV3;
  *     trimprocessv3 -s text.pfx test TRIMExportFile.xml
  * </pre>
  *
- * v1.1 20161114 Fixed bug with generating URI (dealing with odd characters in
- * file name). Added command line arg to point to template directory.
  */
 import java.io.*;
 import java.nio.file.*;
@@ -50,26 +47,30 @@ import java.util.*;
 import java.text.SimpleDateFormat;
 import VEOCreate.CreateVEO;
 import VEOCreate.Fragment;
+import VERSCommon.AppError;
+import VERSCommon.LTSF;
 import VERSCommon.PFXUser;
 import VERSCommon.VEOError;
 import VERSCommon.VEOFatal;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class TrimProcessV3 {
+public class TrimProcessV3CSV {
 
-    static String classname = "TrimProcessV3"; // for reporting
+    static String classname = "TrimProcessV3-CSV"; // for reporting
     ArrayList<String> files;// files or directories to process
-    static B64 b64 = new B64();
     static ByteArrayOutputStream baos = new ByteArrayOutputStream();
     Runtime r;
     long freemem;
-    ArrayList<String> validLTPF; // list of valid long term preservation formats
     String missingXMLEntityExpln; // a description of why the XML entities were missing
+    Path supportDir;        // directory in which is found the support information
+    LTSF ltsf;              // valid long term sustainable formats
+    boolean help;           // true if printing a cheat list of command line options
 
     // global variables storing information about this export (as a whole)
     Path sourceDirectory;   // directory in which TRIM objects are found
@@ -98,8 +99,10 @@ public class TrimProcessV3 {
     int recordTypeCol;      // column in which the record type is found
     int isPartCol;          // column in which the 'is part' info is found
     int docFileCol;         // column in which the attached file is to be found
+    int retSchCol;          // column in which the retention schedule is to be found
 
     Path veoDirectory;    // directory representing the VEO
+    Path dummyLTSFCF;       // file containing the dummyLTSF content file
     ArrayList<Embedded> revisions; // the revisions
     ArrayList<Embedded> renditions; // the renditions
     ArrayList<String> attachments; // attachments to emails
@@ -109,7 +112,19 @@ public class TrimProcessV3 {
     String renditionNo;     // identifier for this particular rendition
 
     // private final static Logger rootLog = Logger.getLogger("TrimProcessV3");
-    private final static Logger LOG = Logger.getLogger("TrimProcessV3.TrimProcessV3");
+    private final static Logger LOG = Logger.getLogger("TrimProcessV3.TrimProcessV3CSV");
+
+    /**
+     * Report on version...
+     *
+     * <pre>
+     * 20161114 1.1 Fixed bug with generating URI (dealing with odd characters in file name). Added command line arg to point to template directory.
+     * 20210505 2.0 Updated & generalised to work with current Cabinet transfer
+     * </pre>
+     */
+    static String version() {
+        return ("2.00");
+    }
 
     /**
      * Default constructor
@@ -117,8 +132,12 @@ public class TrimProcessV3 {
      * @param args arguments passed to program
      * @throws VEOFatal if a fatal error occurred
      */
-    public TrimProcessV3(String args[]) throws VEOFatal {
+    public TrimProcessV3CSV(String args[]) throws VEOFatal {
         super();
+
+        SimpleDateFormat sdf;
+        TimeZone tz;
+        int i;
 
         // Set up logging
         System.setProperty("java.util.logging.SimpleFormatter.format", "%4$s: %5$s%n");
@@ -130,7 +149,7 @@ public class TrimProcessV3 {
         sourceDirectory = Paths.get(".");
         outputDirectory = Paths.get(".");
         templateDir = Paths.get(".");
-        validLTPF = new ArrayList<>();
+        supportDir = null;
         missingXMLEntityExpln = "This portion of the record was not included as the XML representation was missing";
         debug = false;
         verbose = false;
@@ -151,6 +170,92 @@ public class TrimProcessV3 {
 
         // process command line arguments
         configure(args);
+
+        // tell what is happening
+        LOG.log(Level.INFO, "******************************************************************************");
+        LOG.log(Level.INFO, "*                                                                            *");
+        LOG.log(Level.INFO, "*     T R I M   C V S   E X P O R T ( V 3 )   C R E A T I O N   T O O L      *");
+        LOG.log(Level.INFO, "*                                                                            *");
+        LOG.log(Level.INFO, "*                                Version " + version() + "                                *");
+        LOG.log(Level.INFO, "*            Copyright 2015, 2021 Public Record Office Victoria              *");
+        LOG.log(Level.INFO, "*                                                                            *");
+        LOG.log(Level.INFO, "******************************************************************************");
+        LOG.log(Level.INFO, "");
+        LOG.log(Level.INFO, "Run at ");
+        tz = TimeZone.getTimeZone("GMT+10:00");
+        sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss+10:00");
+        sdf.setTimeZone(tz);
+        LOG.log(Level.INFO, sdf.format(new Date()));
+        LOG.log(Level.INFO, "");
+        if (help) {
+            // trimProcessV3 -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-h hashAlg] [-o <directory>] [-a dir]* [-rev] (files|directories)*
+            LOG.log(Level.INFO, "Command line arguments:");
+            LOG.log(Level.INFO, " Mandatory:");
+            LOG.log(Level.INFO, "  -s <pfxFile> <password>: path to a PFX file and its password for signing a VEO");
+            LOG.log(Level.INFO, "  -suppport <directory>: path to a directory containing V3 support files (the LTSF definition)");
+            LOG.log(Level.INFO, "  files or directories: locations to find the TRIM CSV/content export");
+            LOG.log(Level.INFO, "");
+            LOG.log(Level.INFO, " Optional:");
+            LOG.log(Level.INFO, "  -t <directory>: file path to where the templates are located");
+            LOG.log(Level.INFO, "  -h <hashAlgorithm>: specifies the hash algorithm (default SHA-256)");
+            LOG.log(Level.INFO, "  -o <directory>: the directory in which the VEOs are created (default is current working directory)");
+            LOG.log(Level.INFO, "  -rev: include all revisions of the content (if present)");
+            LOG.log(Level.INFO, "");
+            LOG.log(Level.INFO, "  -v: verbose mode: give more details about processing");
+            LOG.log(Level.INFO, "  -d: debug mode: give a lot of details about processing");
+            LOG.log(Level.INFO, "  -help: print this listing");
+            LOG.log(Level.INFO, "");
+        }
+
+        // check to see if at least one file or directory is specified
+        if (files.isEmpty()) {
+            throw new VEOFatal("You must specify at least one file or directory to process");
+        }
+        if (user == null) {
+            throw new VEOFatal("You must specify a PFX file using the -s command line argument");
+        }
+        if (sourceDirectory == null) {
+            throw new VEOFatal("You must specify a source directory using the -source command line argument");
+        }
+        if (supportDir == null) {
+            throw new VEOFatal("You must specify a VERS support directory using the -suppoort command line argument");
+        }
+        if (templateDir == null) {
+            throw new VEOFatal("You must specify a template directory using the -t command line argument");
+        }
+
+        // LOG generic things
+        if (debug) {
+            LOG.log(Level.INFO, "Debug mode is selected");
+        }
+        if (verbose) {
+            LOG.log(Level.INFO, "Verbose output is selected");
+        }
+        if (incRevisions) {
+            LOG.log(Level.INFO, "Including revisions");
+        }
+        LOG.log(Level.INFO, "Hash algorithm is ''{0}''", hashAlg);
+        if (templateDir != null) {
+            LOG.log(Level.INFO, "Common AGLS metadata & VEOReadme.txt from ''{0}''", new Object[]{templateDir.toString()});
+        } else {
+            LOG.log(Level.INFO, "No common AGLS metadata specified");
+        }
+        LOG.log(Level.INFO, "RDF Identifier prefix is ''{0}''", rdfIdPrefix);
+        LOG.log(Level.INFO, "Source directory is ''{0}''", new Object[]{sourceDirectory.toString()});
+        LOG.log(Level.INFO, "Output directory is ''{0}''", new Object[]{outputDirectory.toString()});
+        LOG.log(Level.INFO, "Template directory is ''{0}''", new Object[]{templateDir.toString()});
+        LOG.log(Level.INFO, "Support directory is ''{0}''", new Object[]{supportDir.toString()});
+        LOG.log(Level.INFO, "User id to be logged: ''{0}''", new Object[]{userId});
+        LOG.log(Level.INFO, "PFX user is ''{0}''", new Object[]{user.getUserId()});
+
+        // get template for AGLS metadata
+        aglsCommon = Fragment.parseTemplate(templateDir.resolve("aglsCommon.txt").toFile());
+        ltsf = new LTSF(supportDir.resolve("validLTSF.txt"));
+        try {
+            missingXMLEntityExpln = getExplanation(templateDir.resolve("missingXMLEntityExpln.txt"));
+        } catch (VEOError ve) {
+            /* ignore */
+        }
     }
 
     /**
@@ -167,7 +272,7 @@ public class TrimProcessV3 {
         int i;
         Path pfxFile;           // PFX file to use for signing. If null, don't sign
         String pfxFilePassword; // Password to unlock PFX file
-        String usage = "trimProcessV3 [-v] [-d] [-t template] [-h hashAlg] [-s pfxFile password] [-o <directory>] [-a dir]* [-rev] (files|directories)*";
+        String usage = "trimProcessV3 -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-h hashAlg] [-o <directory>] [-a dir]* [-rev] (files|directories)*";
 
         // process command line arguments
         i = 0;
@@ -208,10 +313,24 @@ public class TrimProcessV3 {
                         i++;
                         break;
 
-                    // '-o' specifies base directory
+                    // '-o' specifies output directory
                     case "-o":
                         i++;
                         outputDirectory = checkFile("output directory", args[i], true);
+                        i++;
+                        break;
+
+                    // '-source' specifies output directory
+                    case "-source":
+                        i++;
+                        sourceDirectory = checkFile("source directory", args[i], true);
+                        i++;
+                        break;
+
+                    // '-support' specifies output directory
+                    case "-support":
+                        i++;
+                        supportDir = checkFile("support directory", args[i], true);
                         i++;
                         break;
 
@@ -252,45 +371,6 @@ public class TrimProcessV3 {
         } catch (VEOFatal vf) {
             throw new VEOFatal("Fatal error: " + vf.toString());
         }
-
-        // check to see if at least one file or directory is specified
-        if (files.isEmpty()) {
-            throw new VEOFatal("You must specify at least one file or directory to process");
-        }
-        if (user == null) {
-            throw new VEOFatal("You must specify a PFX file using the -s command line argument");
-        }
-
-        // LOG generic things
-        if (debug) {
-            LOG.log(Level.INFO, "Debug mode is selected");
-        }
-        if (verbose) {
-            LOG.log(Level.INFO, "Verbose output is selected");
-        }
-        if (incRevisions) {
-            LOG.log(Level.INFO, "Including revisions");
-        }
-        LOG.log(Level.INFO, "Hash algorithm is ''{0}''", hashAlg);
-        if (templateDir != null) {
-            LOG.log(Level.INFO, "Common AGLS metadata & VEOReadme.txt from ''{0}''", new Object[]{templateDir.toString()});
-        } else {
-            LOG.log(Level.INFO, "No common AGLS metadata specified");
-        }
-        LOG.log(Level.INFO, "RDF Identifier prefix is ''{0}''", rdfIdPrefix);
-        LOG.log(Level.INFO, "Source directory is ''{0}''", new Object[]{sourceDirectory.toString()});
-        LOG.log(Level.INFO, "Output directory is ''{0}''", new Object[]{outputDirectory.toString()});
-        LOG.log(Level.INFO, "Template directory is ''{0}''", new Object[]{templateDir.toString()});
-        LOG.log(Level.INFO, "User id to be logged: ''{0}''", new Object[]{userId});
-        LOG.log(Level.INFO, "PFX user is ''{0}''", new Object[]{user.getUserId()});
-
-        // get template for AGLS metadata
-        aglsCommon = Fragment.parseTemplate(Paths.get(templateDir.toString(), "aglsCommon.txt").toFile());
-        getValidLTPF(Paths.get(templateDir.toString(), "ltpf.txt"));
-        try {
-            missingXMLEntityExpln = getExplanation(Paths.get(templateDir.toString(), "missingXMLEntityExpln.txt"));
-        } catch (VEOError ve) {
-            /* ignore */ }
     }
 
     /**
@@ -318,50 +398,6 @@ public class TrimProcessV3 {
             throw new VEOFatal(classname, 8, type + " '" + p.toAbsolutePath().toString() + "' is a directory not a file");
         }
         return p;
-    }
-
-    /**
-     * getValidLTPF
-     *
-     * This reads a set of file extensions from the file 'ltpf.txt' in the
-     * template directory. A file extension is the characters after the '.' in a
-     * file name (e.g. 'doc', or 'pdf')
-     */
-    private void getValidLTPF(Path labels) {
-        FileReader fr = null;
-        BufferedReader br = null;
-        String line;
-
-        try {
-            fr = new FileReader(labels.toString());
-            br = new BufferedReader(fr);
-            while ((line = br.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty()) {
-                    continue;
-                }
-                validLTPF.add(line);
-            }
-        } catch (FileNotFoundException fnfe) {
-            LOG.log(Level.INFO, "Valid LTPF file ''{0}'' does not exist", new Object[]{labels.toString()});
-        } catch (IOException ioe) {
-            LOG.log(Level.INFO, "Error when reading Valid LTPF file ''{0}'': ''{1}''", new Object[]{labels.toString(), ioe.getMessage()});
-        } finally {
-            try {
-                if (br != null) {
-                    br.close();
-                }
-            } catch (IOException e) {
-                /* ignore */
-            }
-            try {
-                if (fr != null) {
-                    fr.close();
-                }
-            } catch (IOException e) {
-                /* ignore */
-            }
-        }
     }
 
     /**
@@ -425,7 +461,7 @@ public class TrimProcessV3 {
             if (file == null) {
                 continue;
             }
-            processFile(Paths.get(file));
+            processFile(sourceDirectory.resolve(file));
         }
     }
 
@@ -441,17 +477,13 @@ public class TrimProcessV3 {
 
         // check that file or directory exists
         if (!Files.exists(f)) {
-            if (verbose) {
-                LOG.log(Level.WARNING, "***File ''{0}'' does not exist", new Object[]{f.toString()});
-            }
+            LOG.log(Level.WARNING, "***File ''{0}'' does not exist", new Object[]{f.toString()});
             return;
         }
 
         // if file is a directory, go through directory and test all the files
         if (Files.isDirectory(f)) {
-            if (verbose) {
-                LOG.log(Level.INFO, "***Processing directory ''{0}''", new Object[]{f.toString()});
-            }
+            LOG.log(Level.INFO, "***Processing directory ''{0}''", new Object[]{f.toString()});
             try {
                 ds = Files.newDirectoryStream(f);
                 for (Path p : ds) {
@@ -465,7 +497,7 @@ public class TrimProcessV3 {
         }
 
         // is this file a TRIM entity file?
-        if (Files.isRegularFile(f) && f.toString().toLowerCase().endsWith("export.txt")) {
+        if (Files.isRegularFile(f)) {
             // convert the TRIM entity file into a set of TRIM entities & process them
             try {
                 entities = readTrimEntityFile(f);
@@ -473,13 +505,11 @@ public class TrimProcessV3 {
                     processTrimEntities(entities);
                 }
                 rememberTrimEntities(entities, f.getParent());
-                entities = null;
             } catch (VEOError e) {
-                System.out.println("***Ignoring TRIM entity file '" + f.toString() + "' because: " + e.getMessage());
-                return;
+                LOG.log(Level.WARNING, "***Ignoring TRIM entity file  ''{0}'': {1}", new Object[]{f.toString(), e.getMessage()});
             }
         } else if (debug) {
-            System.out.println("***Ignoring file '" + f.toString() + "'");
+            LOG.log(Level.INFO, "***Ignoring file  ''{0}''", new Object[]{f.toString()});
         }
     }
 
@@ -513,8 +543,9 @@ public class TrimProcessV3 {
         }
         entities = new TreeMap<>();
         try {
-            fr = new FileReader(f.toString());
-            br = new BufferedReader(fr);
+            FileInputStream fs = new FileInputStream(f.toFile());
+            InputStreamReader isr = new InputStreamReader(fs, StandardCharsets.UTF_16);
+            br = new BufferedReader(isr);
             idCol = -1;
             containerCol = -1;
             containedCol = -1;
@@ -523,11 +554,12 @@ public class TrimProcessV3 {
             recordTypeCol = -1;
             isPartCol = -1;
             docFileCol = -1;
+            retSchCol = -1;
             lineNo = 1;
             while ((line = br.readLine()) != null) {
 
                 // read a line and split it at tabs
-                line = line.trim();
+                //line = line.trim();
                 if (line.isEmpty()) {
                     continue;
                 }
@@ -536,12 +568,14 @@ public class TrimProcessV3 {
                 // assume that the first row has the column headings. This
                 // remembers the column number of metadata elements that will
                 // be later pulled out.
-                if (lineNo == 2) {
+                if (lineNo == 1) {
+                    System.out.println("Columns:" + tokens.length);
                     for (i = 0; i < tokens.length; i++) {
                         switch (tokens[i].trim()) {
                             case "Expanded Number":
                                 idCol = i;
                                 break;
+                            case "Folder":
                             case "Container":
                                 containerCol = i;
                                 break;
@@ -569,6 +603,9 @@ public class TrimProcessV3 {
                             case "DOS file":
                                 docFileCol = i;
                                 break;
+                            case "Retention schedule":
+                                retSchCol = i;
+                                break;
                             default:
                                 break;
                         }
@@ -579,9 +616,11 @@ public class TrimProcessV3 {
                     if (containerCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find 'Container' column");
                     }
+                    /*
                     if (containedCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find '*Contained Records*' column");
                     }
+                     */
                     if (titleCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find 'Title (Free Text Part)' column");
                     }
@@ -597,14 +636,19 @@ public class TrimProcessV3 {
                     if (recordTypeCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find 'Record Type' column");
                     }
+                    /*
                     if (isPartCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find '*Is Part*' column");
                     }
+                     */
                     if (docFileCol == -1) {
                         throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find 'DOS File' column");
                     }
+                    if (retSchCol == -1) {
+                        throw new VEOError("Error reading '" + f.toRealPath().toString() + "': Could not find 'Retention schedule' column");
+                    }
                     labels = tokens;
-                } else if (lineNo > 2) {
+                } else if (lineNo > 1) {
                     // create a TrimEntity of this row
                     key = tokens[idCol].trim();
                     te = entities.get(key);
@@ -615,12 +659,42 @@ public class TrimProcessV3 {
                     te.defined = true;
 
                     te.veoName = tokens[idCol];
-                    te.container = tokens[containerCol];
+                    if (tokens[containerCol] != null && !tokens[containerCol].equals("")) {
+                        te.container = new TrimID(tokens[containerCol]);
+                    }
                     te.title = tokens[titleCol];
                     te.dateCreated = tokens[dateCreatedCol];
                     te.dateRegistered = tokens[dateRegisteredCol];
                     te.classification = tokens[classificationCol];
-                    te.recordType = tokens[recordTypeCol];
+                    switch (tokens[recordTypeCol]) {
+                        case "CABINET FILE":
+                            te.recordType = "Cabinet File";
+                            break;
+                        case "CORPORATE DOCUMENT":
+                            te.recordType = "Corporate Document";
+                            break;
+                        case "DOCUMENT GROUP":
+                            te.recordType = "Document Group";
+                            break;
+                        case "EBC DOCUMENT":
+                            te.recordType = "EBC Document";
+                            break;
+                        case "EBC FOLDER":
+                            te.recordType = "EBC Folder";
+                            break;
+                        case "MINISTERIAL BRIEFING - VERS":
+                            te.recordType = "Ministerial Briefing - VERS";
+                            break;
+                        case "MINISTERIAL CORRESPONDENCE  - VERS":
+                            te.recordType = "Ministerial Correspondence - VERS";
+                            break;
+                        default:
+                            System.out.println("WARNING: Unhandled record type: '" + tokens[recordTypeCol] + "'");
+                            te.recordType = tokens[recordTypeCol];
+                            break;
+                    }
+                    te.retentionSchedule = tokens[retSchCol];
+                    System.out.println(te.toString());
                 }
                 lineNo++;
             }
@@ -686,7 +760,7 @@ public class TrimProcessV3 {
      * entities read from the TRIM export file and selects the root entities to
      * construct VEOs from
      */
-    private void processTrimEntities(SortedMap<String, TrimEntity> entities) throws VEOError {
+    private void processTrimEntities(SortedMap<String, TrimEntity> entities) {
         Iterator<String> it;
         String key;
         TrimEntity te;
@@ -702,7 +776,7 @@ public class TrimProcessV3 {
                 te.root = true;
                 try {
                     createVEO(te, entities);
-                } catch (VEOError e) {
+                } catch (VEOError | AppError e) {
                     LOG.log(Level.WARNING, "Failed to build VEO ''{0}'' because {1}", new Object[]{key, e.getMessage()});
                 }
             }
@@ -718,14 +792,14 @@ public class TrimProcessV3 {
      * @throws VEOError if an error occurred that prevented the processing of
      * this XML file
      */
-    private void createVEO(TrimEntity base, SortedMap<String, TrimEntity> entities) throws VEOError {
+    private void createVEO(TrimEntity base, SortedMap<String, TrimEntity> entities) throws VEOError, AppError {
         long l;
         CreateVEO cv;
         Path p;
         String recordName;      // name of this record element (the id of the root TRIM entity)
         String description[] = {"Created with TrimProcessV3"};
         String errors[] = {""};
-        StringBuffer res;
+        StringBuilder res;
 
         // check parameters
         if (base == null) {
@@ -741,9 +815,10 @@ public class TrimProcessV3 {
         l = r.freeMemory();
         LOG.log(Level.INFO, "{0} Processing: {1}", new Object[]{(new Date()).getTime() / 1000, base.name});
         freemem = l;
+        dummyLTSFCF = null;
 
         // get the record name from the root TRIM entity
-        recordName = base.id.replace('/', '-');
+        recordName = base.id.toString().replace('/', '-');
 
         // create a record directory in the output directory
         p = Paths.get(outputDirectory.toString(), recordName + ".veo");
@@ -757,12 +832,13 @@ public class TrimProcessV3 {
         }
 
         // create VEO...
+        res = new StringBuilder();
         cv = new CreateVEO(outputDirectory, recordName, hashAlg, verbose);
         try {
-            cv.addVEOReadme(templateDir);
+            cv.addVEOReadme(supportDir);
             cv.addEvent(versDateTime(System.currentTimeMillis()), "Converted to VEO", userId, description, errors);
-            res = processTrimEntity(base, entities, cv, recordName, 1, recordName + ".veo.zip");
-            if (res != null) {
+            processTrimEntity(base, entities, cv, recordName, 1, recordName + ".veo.zip", res);
+            if (res.length() != 0) {
                 if (res.charAt(res.length() - 1) == '\n') {
                     res.setCharAt(res.length() - 1, ' ');
                 }
@@ -793,36 +869,35 @@ public class TrimProcessV3 {
      * @throws VEOError if an error occurred that prevented the processing of
      * this XML file
      */
-    private StringBuffer processTrimEntity(TrimEntity base, SortedMap<String, TrimEntity> entities, CreateVEO cv, String recordName, int depth, String veoName) throws VEOError {
-        int i, j;
-        Path contentDir;
+    private void processTrimEntity(TrimEntity base, SortedMap<String, TrimEntity> entities, CreateVEO cv, String recordName, int depth, String veoName, StringBuilder res) throws VEOError, AppError {
+        int i;
         String label;
-        String[] data = {}, name;
+        String[] data = {};
         ArrayList<String> children;
-        StringBuffer res, r1;
         URI uri;
-        boolean isLTPF;
         String s;
         Iterator<String> teKeys;
         String[] contents;
-        TrimEntity t, te;
+        TrimEntity t;
+        Path p;
 
         // set up
         revisions = new ArrayList<>();
         renditions = new ArrayList<>();
         attachments = new ArrayList<>();
         children = new ArrayList<>();
-        res = new StringBuffer();
 
         staticChildren = null;
 
         // add the information object
         try {
             // make a label for the information object, comprised of a TRIM record type and the record id
-            if (base.tokens[recordTypeCol] == null || base.tokens[recordTypeCol].equals("")) {
-                label = recordName;
+            s = base.tokens[recordTypeCol];
+            if (s == null || s.equals("")) {
+                label = null;
+                // label = recordName;
             } else {
-                label = base.tokens[recordTypeCol] + " " + recordName;
+                label = "Cabinet-in-Confidence Departmental Working Records: " + base.recordType;
             }
 
             // create information object
@@ -857,17 +932,6 @@ public class TrimProcessV3 {
             // add final version of record and any encodings (renditions in TRIM speak)
             if (base.tokens[docFileCol] != null && !base.tokens[docFileCol].equals("")) {
 
-                // create a directory in the VEO directory in which to put the record content
-                contentDir = Paths.get(veoDirectory.toString(), base.name);
-                if (!deleteDirectory(contentDir)) {
-                    throw new VEOError("Arrgh: directory '" + contentDir.toString() + "' already exists & couldn't be deleted");
-                }
-                try {
-                    Files.createDirectory(contentDir);
-                } catch (IOException ioe) {
-                    throw new VEOError("Arrgh: could not create content directory '" + contentDir.toString() + "': " + ioe.toString());
-                }
-
                 // get the content files for this TRIM entity. There will be two
                 // file names, separated by a '|'. The first is the internal TRIM
                 // file name, the second appears to be the original file name.
@@ -880,16 +944,16 @@ public class TrimProcessV3 {
                 }
 
                 // add an information piece with a single content file
+                String veoRef = (recordName.replace('/', '-') + "/" + contents[i]);
+                p = sourceDirectory.resolve(contents[i]);
                 try {
-                    copyContentFile(base, contents[0], contentDir, contents[i]);
-                    cv.addInformationPiece("Final");
-                    cv.addContentFile(recordName.replace('/', '-') + "/" + contents[i]);
+                    cv.addInformationPiece(null);
+                    cv.addContentFile(veoRef, p);
                 } catch (VEOError e) {
                     res.append("Information Object " + base.name + " is incomplete because: ");
                     res.append(e.getMessage());
                     res.append("\n");
                 }
-                isLTPF = isLTPF(contents[i]);
 
                 /* this export doesn't include renditions or attachements
                     for (i = 0; i < attachments.size(); i++) {
@@ -902,18 +966,21 @@ public class TrimProcessV3 {
                  */
                 // if the content file wasn't a valid long term preservation
                 // format, add a dummy content file with a .txt content
-                if (!isLTPF) {
-                    s = contentDir.toString() + "/DummyContentFile.txt";
-                    try {
-                        FileWriter fw = new FileWriter(s);
-                        BufferedWriter bw = new BufferedWriter(fw);
-                        bw.write("This Information Piece has no content in an approved long term preservation format\n");
-                        bw.close();
-                        fw.close();
-                        cv.addContentFile(recordName.replace('/', '-') + "/DummyContentFile.txt");
-                    } catch (IOException ioe) {
-                        res.append("Failed attempting to add DummyContentFile: " + ioe.getMessage());
+                if (!isLTPF(contents[i])) {
+                    LOG.log(Level.WARNING, "File ''{0}'' has no long term sustainable format", new Object[]{p.toString()});
+                    if (dummyLTSFCF == null) {
+                        p = sourceDirectory.resolve("DummyContentFile.txt");
+                        try {
+                            try (FileWriter fw = new FileWriter(p.toAbsolutePath().toString()); BufferedWriter bw = new BufferedWriter(fw)) {
+                                bw.write("This Information Piece has no content in an approved long term preservation format\n");
+                            }
+                            dummyLTSFCF = p;
+                        } catch (IOException ioe) {
+                            res.append("Failed attempting to add DummyContentFile: " + ioe.getMessage());
+                        }
                     }
+                    veoRef = (recordName.replace('/', '-') + "/DummyContentFile.txt");
+                    cv.addContentFile(veoRef, dummyLTSFCF);
                 }
             }
 
@@ -934,6 +1001,7 @@ public class TrimProcessV3 {
             // literal characters '\r\n'. Each reference is the TRIM id, a ':',
             // and the name. The TRIM id has a two digit year, instead of the 
             // four digit year used elsewhere. UGGGH.
+            /*
             s = base.tokens[containedCol];
             if (s != null && !s.equals("")) {
                 contents = s.split("\\\\r\\\\n");
@@ -956,23 +1024,19 @@ public class TrimProcessV3 {
                     base.refs.add(s);
                 }
             }
-
+             */
             // find contained entities. All contained entities are assumed to be
             // in the one source directory (hence are in the TRIM entity list)
             // Contained entries are found by looking for entities that have a
             // container metadata that matches the current base. This is because
             // the contained records element is complex
+            TrimID ti = base.id;
             teKeys = entities.keySet().iterator();
             while (teKeys.hasNext()) {
                 s = teKeys.next();
                 t = entities.get(s);
-                s = base.tokens[idCol];
-                r1 = null;
-                if (t.tokens != null && s.equals(t.tokens[containerCol].trim())) {
-                    r1 = processTrimEntity(t, entities, cv, t.tokens[idCol].trim(), depth + 1, veoName);
-                }
-                if (r1 != null) {
-                    res.append(r1);
+                if (t.container != null && t.container.equals(ti)) {
+                    processTrimEntity(t, entities, cv, t.tokens[idCol].trim(), depth + 1, veoName, res);
                 }
             }
         } catch (VEOError ve) {
@@ -998,10 +1062,6 @@ public class TrimProcessV3 {
                 attachments = null;
             }
         }
-        if (res.length() == 0) {
-            res = null;
-        }
-        return res;
     }
 
     /**
@@ -1016,7 +1076,7 @@ public class TrimProcessV3 {
             return false;
         }
         filetype = filename.substring(i).toLowerCase();
-        return validLTPF.contains(filetype);
+        return ltsf.isV3LTSF(filetype);
     }
 
     /**
@@ -1052,16 +1112,16 @@ public class TrimProcessV3 {
         }
         cv.continueMetadataPackage("\">\n");
         cv.continueMetadataPackage(" <dcterms:title>");
-        cv.continueMetadataPackage(recordName);
+        cv.continueMetadataPackage(XMLencode(recordName));
         cv.continueMetadataPackage("</dcterms:title>\n");
         cv.continueMetadataPackage(" <dcterms:created rdf:datatype=\"xsd:dateTime\">");
-        cv.continueMetadataPackage(versDateTime(0));
+        cv.continueMetadataPackage(XMLencode(versDateTime(0)));
         cv.continueMetadataPackage("</dcterms:created>\n");
         cv.continueMetadataPackage(" <dcterms:description>");
-        cv.continueMetadataPackage(description);
+        cv.continueMetadataPackage(XMLencode(description));
         cv.continueMetadataPackage("</dcterms:description>\n");
         cv.continueMetadataPackage(" <dcterms:identifier>");
-        cv.continueMetadataPackage(recordName);
+        cv.continueMetadataPackage(XMLencode(recordName));
         cv.continueMetadataPackage("</dcterms:identifier>\n");
         cv.continueMetadataPackage(" </rdf:Description>\n</rdf:RDF>\n");
     }
@@ -1105,7 +1165,7 @@ public class TrimProcessV3 {
      *
      * @param e the TRIM entity to extract metadata from
      */
-    private String makeAGLSmetadata(TrimEntity e) {
+    private String makeAGLSmetadata(TrimEntity e) throws AppError {
         StringBuffer sb;
 
         sb = new StringBuffer();
@@ -1120,11 +1180,16 @@ public class TrimProcessV3 {
         sb.append(" <dcterms:type>");
         sb.append(XMLencode(e.tokens[recordTypeCol]));
         sb.append("</dcterms:type>\n");
+        sb.append(" <dcterms:description>");
+        sb.append(XMLencode(e.recordType));
+        sb.append("</dcterms:description>\n");
         // case "trim/record/container":
+        /*
         sb.append(" <dcterms:isPart>");
         sb.append(XMLencode(e.tokens[isPartCol]));
         sb.append("</dcterms:isPart>\n");
-        /*
+         */
+ /*
         // case "trim/record/classification":
         currentEntity.classification = e.tokens[titleCol];
         // case "trim/record/dateregistered":
@@ -1148,7 +1213,7 @@ public class TrimProcessV3 {
 
         sb = new StringBuilder();
         for (i = 0; i < labels.length; i++) {
-            if (labels[i] == null || labels[i] == "") {
+            if (labels[i] == null || labels[i].equals("")) {
                 continue;
             }
             // temporarily don't output empty elements
@@ -1172,7 +1237,6 @@ public class TrimProcessV3 {
             sb.append(s);
             if (i >= e.tokens.length || e.tokens[i] == null || e.tokens[i].equals("")) {
                 sb.append("/>\n");
-                continue;
             } else {
                 sb.append(">");
                 sb.append(XMLencode(e.tokens[i]));
@@ -1195,7 +1259,7 @@ public class TrimProcessV3 {
         if (srcfn == null || srcfn.equals("")) {
             throw new VEOError("Copying DOS content file from entity failed as the content file name is null");
         }
-        source = Paths.get(base.dir.toString(), srcfn.toString());
+        source = Paths.get(base.dir.toString(), srcfn);
         if (!Files.exists(source)) {
             throw new VEOError("TRIM entity content: '" + source.toString() + "' does not exist");
         }
@@ -1204,7 +1268,7 @@ public class TrimProcessV3 {
         }
 
         // get the destination directory
-        destination = Paths.get(destDir.toString(), destfn.toString());
+        destination = Paths.get(destDir.toString(), destfn);
 
         // copy
         try {
@@ -1311,7 +1375,7 @@ public class TrimProcessV3 {
      * @param date the TRIM date
      * @return the ISO8601 date
      */
-    private String processDate(String date) {
+    private String processOldDate(String date) {
         int i, p;
         String s, year, month, day, hour, min;
 
@@ -1336,7 +1400,6 @@ public class TrimProcessV3 {
         if (date.length() < 11) {
             s = year + "-" + month + "-" + day;
         } else {
-            p += 8;
             if (date.charAt(p + 1) == ':') {
                 i = Integer.parseInt(date.substring(p, p + 1));
                 p += 2;
@@ -1352,6 +1415,59 @@ public class TrimProcessV3 {
             s = year + "-" + month + "-" + day + "T" + hour + ":" + min;
         }
         return s;
+    }
+
+    /**
+     * Function to process the TRIM date into an ISO8601 date. The TRIM date has
+     * the format yyyymmddhhmmss. Some or all of the fine time divisions may not
+     * be present
+     *
+     * @param date the TRIM date
+     * @return the ISO8601 date
+     */
+    private String processDate(String date) throws AppError {
+        String year, month, day, hour, min, sec;
+
+        if (date == null || date.length() < 4) {
+            throw new AppError("Failed converting date '" + date + "': date is null or less than 4 characters long");
+        }
+        year = date.substring(0, 4);
+        if (date.length() == 4) {
+            return year;
+        }
+        if (date.length() < 6) {
+            throw new AppError("Failed converting date '" + date + "': date is less than 6 characters long");
+        }
+        month = date.substring(4, 6);
+        if (date.length() == 6) {
+            return year + "-" + month;
+        }
+        if (date.length() < 8) {
+            throw new AppError("Failed converting date '" + date + "': date is less than 8 characters long");
+        }
+        day = date.substring(6, 8);
+        if (date.length() == 8) {
+            return year + "-" + month + "-" + day;
+        }
+        if (date.length() < 10) {
+            throw new AppError("Failed converting date '" + date + "': date is less than 10 characters long");
+        }
+        hour = date.substring(8, 10);
+        if (date.length() == 10) {
+            return year + "-" + month + "-" + day + "T" + hour + ":00";
+        }
+        if (date.length() < 12) {
+            throw new AppError("Failed converting date '" + date + "': date is less than 12 characters long");
+        }
+        min = date.substring(10, 12);
+        if (date.length() == 12) {
+            return year + "-" + month + "-" + day + "T" + hour + ":" + min;
+        }
+        if (date.length() < 14) {
+            throw new AppError("Failed converting date '" + date + "': date is less than 14 characters long");
+        }
+        sec = date.substring(12, 14);
+        return year + "-" + month + "-" + day + "T" + hour + ":" + min + ":" + sec;
     }
 
     /**
@@ -1414,11 +1530,6 @@ public class TrimProcessV3 {
             System.out.println("Revisions contained in TRIM export have been discarded");
         }
         System.out.println("Hash algorithm is " + hashAlg);
-        if (templateDir != null) {
-            System.out.println("Common AGLS metadata & VEOReadme.txt from '" + templateDir.toAbsolutePath().toString() + "'");
-        } else {
-            System.out.println("No common AGLS metadata specified");
-        }
         System.out.println("Source directory is '" + sourceDirectory.toAbsolutePath().toString() + "'");
         System.out.println("Output directory is '" + outputDirectory.toAbsolutePath().toString() + "'");
         System.out.println("Template directory is '" + templateDir.toAbsolutePath().toString() + "'");
@@ -1439,6 +1550,7 @@ public class TrimProcessV3 {
         }
          */
         // Entities that were referenced, but not included in export
+        /* Not used as this export doesn't list children
         it = allEntities.keySet().iterator();
         anyFound = false;
         System.out.println();
@@ -1470,7 +1582,7 @@ public class TrimProcessV3 {
             System.out.println("\tNo entities");
         }
         System.out.println();
-
+         */
         // Report on root entities
         it = allEntities.keySet().iterator();
         anyFound = false;
@@ -1523,14 +1635,14 @@ public class TrimProcessV3 {
                 if (onlyExported && onlyRoot && !te.root) {
                     continue;
                 }
-                bw.write(te.id);
+                bw.write(te.id.toString());
                 bw.write("\t");
                 if (te.veoName != null) {
                     bw.write(te.veoName);
                 }
                 bw.write("\t");
                 if (te.container != null) {
-                    bw.write(te.container);
+                    bw.write(te.container.toString());
                 }
                 bw.write("\t");
                 if (te.title != null) {
@@ -1644,7 +1756,7 @@ public class TrimProcessV3 {
      */
     private class TrimEntity {
 
-        String id;          // id of TRIM entity
+        TrimID id;          // id of TRIM entity
         String name;        // name of the TRIM entity (i.e. id converted to be safe)
         boolean root;       // true if a root entity
         boolean referenced; // true if referenced by another TRIM entity
@@ -1655,19 +1767,20 @@ public class TrimProcessV3 {
         ArrayList<String> refs; // list of other TRIM entities this entity references
         Path dir;           // directory in which this TRIM entity is to be found
         String veoName;
-        String container;
+        TrimID container;
         String title;
         String dateCreated;
         String dateRegistered;
         String classification;
         String recordType;
+        String retentionSchedule;
 
-        public TrimEntity(String id, String[] tokens, Path dir) {
+        public TrimEntity(String id, String[] tokens, Path dir) throws Error {
             StringBuilder sb;
             int j;
             char c;
 
-            this.id = id;
+            this.id = new TrimID(id);
             sb = new StringBuilder();
             for (j = 0; j < id.length(); j++) {
                 c = id.charAt(j);
@@ -1693,6 +1806,71 @@ public class TrimProcessV3 {
             dateRegistered = null;
             classification = null;
             recordType = null;
+            retentionSchedule = null;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("id:" + name);
+            sb.append("\tparent:" + container);
+            sb.append("\ttitle:" + title);
+            sb.append("\tclass:" + classification);
+            sb.append("\tretSch:" + retentionSchedule);
+            return sb.toString();
+        }
+    }
+
+    private class TrimID {
+
+        String type;
+        String year;
+        int seq;
+
+        public TrimID(String id) throws Error {
+            String[] tokens;
+
+            if (id == null) {
+                throw new Error("Invalid TRIM ID: null pointer");
+            }
+            tokens = id.split("/");
+            if (tokens.length != 3) {
+                throw new Error("Invalid TRIM ID: '" + id + "': doesn't have three parts separated by '/'");
+            }
+            type = tokens[0];
+            switch (tokens[1].length()) {
+                case 2:
+                    year = tokens[1];
+                    break;
+                case 4:
+                    year = tokens[1].substring(2);
+                    break;
+                default:
+                    throw new Error("Invalid TRIM ID: '" + id + "': year is not 2 or 4 digits in length (" + tokens[1] + ")");
+            }
+            try {
+                seq = Integer.parseInt(tokens[2]);
+            } catch (NumberFormatException nfe) {
+                throw new Error("Invalid TRIM ID: '" + id + "': invalid sequence number: " + nfe.toString());
+            }
+        }
+
+        public boolean equals(TrimID i) {
+            if (!i.type.equals(type)) {
+                return false;
+            }
+            if (!i.year.equals(year)) {
+                return false;
+            }
+            if (i.seq != seq) {
+                return false;
+            }
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return type + "/" + year + "/" + seq;
         }
     }
 
@@ -1858,10 +2036,10 @@ public class TrimProcessV3 {
      * @param args command line arguments
      */
     public static void main(String args[]) {
-        TrimProcessV3 tp;
+        TrimProcessV3CSV tp;
 
         try {
-            tp = new TrimProcessV3(args);
+            tp = new TrimProcessV3CSV(args);
             tp.processExports();
             tp.report();
         } catch (VEOError e) {

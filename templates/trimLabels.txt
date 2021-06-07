@@ -1,2 +1,0 @@
-DOC	Document
-	Unknown Document Type
