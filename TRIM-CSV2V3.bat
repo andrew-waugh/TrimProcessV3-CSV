@@ -8,4 +8,4 @@ if exist "J:/PROV/TECHNOLOGY MANAGEMENT/Application Development/VERS/VERSCode" (
 ) else (
 	set code="C:/Users/Andrew/Documents/Work/VERSCode"
 )
-java -classpath %code%/TrimProcessV3CSV/dist/* TrimProcessV3.TrimProcessV3CSV -v -support %code%/VERSCommon/VERSSupportFiles/validLTSF.txt %*
+java -classpath %code%/TrimProcessV3-CSV/dist/* TrimProcessV3.TrimProcessV3CSV -v -support %code%/VERSCommon/VERSSupportFiles %*
