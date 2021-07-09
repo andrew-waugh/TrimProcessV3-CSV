@@ -57,6 +57,7 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -120,10 +121,11 @@ public class TrimProcessV3CSV {
      * <pre>
      * 20161114 1.1 Fixed bug with generating URI (dealing with odd characters in file name). Added command line arg to point to template directory.
      * 20210505 2.0 Updated & generalised to work with current Cabinet transfer
+     * 20210709 2.1 Updated to work on PISA with BAT file
      * </pre>
      */
     static String version() {
-        return ("2.00");
+        return ("2.1");
     }
 
     /**
@@ -141,7 +143,9 @@ public class TrimProcessV3CSV {
 
         // Set up logging
         System.setProperty("java.util.logging.SimpleFormatter.format", "%4$s: %5$s%n");
+        LOG.addHandler(new ConsoleHandler());
         LOG.setLevel(Level.WARNING);
+        LOG.setUseParentHandlers(false);
         // rootLog.setLevel(Level.WARNING);
 
         // set up default global variables
@@ -185,7 +189,7 @@ public class TrimProcessV3CSV {
         tz = TimeZone.getTimeZone("GMT+10:00");
         sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss+10:00");
         sdf.setTimeZone(tz);
-        LOG.log(Level.INFO, sdf.format(new Date()));
+        LOG.log(Level.INFO, "Run at {0}", new Object[]{sdf.format(new Date())});
         LOG.log(Level.INFO, "");
         if (help) {
             // trimProcessV3 -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-h hashAlg] [-o <directory>] [-a dir]* [-rev] (files|directories)*
@@ -236,15 +240,15 @@ public class TrimProcessV3CSV {
         }
         LOG.log(Level.INFO, "Hash algorithm is ''{0}''", hashAlg);
         if (templateDir != null) {
-            LOG.log(Level.INFO, "Common AGLS metadata & VEOReadme.txt from ''{0}''", new Object[]{templateDir.toString()});
+            LOG.log(Level.INFO, "Common AGLS metadata & VEOReadme.txt from ''{0}''", new Object[]{templateDir.toAbsolutePath().toString()});
         } else {
             LOG.log(Level.INFO, "No common AGLS metadata specified");
         }
         LOG.log(Level.INFO, "RDF Identifier prefix is ''{0}''", rdfIdPrefix);
-        LOG.log(Level.INFO, "Source directory is ''{0}''", new Object[]{sourceDirectory.toString()});
-        LOG.log(Level.INFO, "Output directory is ''{0}''", new Object[]{outputDirectory.toString()});
-        LOG.log(Level.INFO, "Template directory is ''{0}''", new Object[]{templateDir.toString()});
-        LOG.log(Level.INFO, "Support directory is ''{0}''", new Object[]{supportDir.toString()});
+        LOG.log(Level.INFO, "Source directory is ''{0}''", new Object[]{sourceDirectory.toAbsolutePath().toString()});
+        LOG.log(Level.INFO, "Output directory is ''{0}''", new Object[]{outputDirectory.toAbsolutePath().toString()});
+        LOG.log(Level.INFO, "Template directory is ''{0}''", new Object[]{templateDir.toAbsolutePath().toString()});
+        LOG.log(Level.INFO, "Support directory is ''{0}''", new Object[]{supportDir.toAbsolutePath().toString()});
         LOG.log(Level.INFO, "User id to be logged: ''{0}''", new Object[]{userId});
         LOG.log(Level.INFO, "PFX user is ''{0}''", new Object[]{user.getUserId()});
 
@@ -284,6 +288,7 @@ public class TrimProcessV3CSV {
                     case "-v":
                         verbose = true;
                         LOG.setLevel(Level.INFO);
+                        System.out.println("Log Info");
                         // rootLog.setLevel(Level.INFO);
                         i++;
                         break;
