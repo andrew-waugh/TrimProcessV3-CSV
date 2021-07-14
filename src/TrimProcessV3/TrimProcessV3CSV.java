@@ -199,13 +199,14 @@ public class TrimProcessV3CSV {
             LOG.log(Level.SEVERE, "Command line arguments:");
             LOG.log(Level.SEVERE, " Mandatory:");
             LOG.log(Level.SEVERE, "  -s <pfxFile> <password>: path to a PFX file and its password for signing a VEO");
+            LOG.log(Level.SEVERE, "  -t <directory>: file path to where the templates are located");
             LOG.log(Level.SEVERE, "  -suppport <directory>: path to a directory containing V3 support files (the LTSF definition)");
-            LOG.log(Level.SEVERE, "  files: TRIM CSV/content export(s)");
+            LOG.log(Level.SEVERE, "  files: TRIM CSV/content export(s) files in the source directory");
             LOG.log(Level.SEVERE, "");
             LOG.log(Level.SEVERE, " Optional:");
-            LOG.log(Level.SEVERE, "  -t <directory>: file path to where the templates are located");
-            LOG.log(Level.SEVERE, "  -h <hashAlgorithm>: specifies the hash algorithm (default SHA-256)");
+            LOG.log(Level.SEVERE, "  -source <directory>: path to a directory containing the export (default is current working directory");
             LOG.log(Level.SEVERE, "  -o <directory>: the directory in which the VEOs are created (default is current working directory)");
+            LOG.log(Level.SEVERE, "  -h <hashAlgorithm>: specifies the hash algorithm (default SHA-256)");
             LOG.log(Level.SEVERE, "  -rev: include all revisions of the content (if present)");
             LOG.log(Level.SEVERE, "");
             LOG.log(Level.SEVERE, "  -v: verbose mode: give more details about processing");
@@ -272,7 +273,7 @@ public class TrimProcessV3CSV {
         int i;
         Path pfxFile;           // PFX file to use for signing. If null, don't sign
         String pfxFilePassword; // Password to unlock PFX file
-        String usage = "trimProcessV3 -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-h hashAlg] [-o <directory>] [-a dir]* [-rev] (files|directories)*";
+        String usage = "trimProcessV3 [-help] -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-ha hashAlg] [-o <directory>] [-a dir]* [-rev] [-source <directory>] (files)*";
 
         // process command line arguments
         i = 0;
