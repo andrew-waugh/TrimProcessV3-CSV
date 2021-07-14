@@ -75,6 +75,7 @@ public class TrimProcessV3CSV {
 
     // global variables storing information about this export (as a whole)
     Path sourceDirectory;   // directory in which TRIM objects are found
+    Path contentDirectory;  // directory where content files are to be found (relative to source directory)
     Path outputDirectory;   // directory in which VEOS are to be generated
     Path templateDir;       // directory in which the template is to be found
     int exportCount;        // number of exports processed
@@ -123,7 +124,7 @@ public class TrimProcessV3CSV {
      * 20210505 2.0 Updated & generalised to work with current Cabinet transfer
      * 20210709 2.1 Updated to work on PISA with BAT file
      * 20210712 2.2 Improved reporting
-     * 20210714 2.3 Added help option
+     * 20210714 2.3 Added content directory etc
      * </pre>
      */
     static String version() {
@@ -154,6 +155,7 @@ public class TrimProcessV3CSV {
         // set up default global variables
         files = new ArrayList<>();
         sourceDirectory = Paths.get(".");
+        contentDirectory = Paths.get(".");
         outputDirectory = Paths.get(".");
         templateDir = Paths.get(".");
         supportDir = null;
@@ -205,6 +207,7 @@ public class TrimProcessV3CSV {
             LOG.log(Level.SEVERE, "");
             LOG.log(Level.SEVERE, " Optional:");
             LOG.log(Level.SEVERE, "  -source <directory>: path to a directory containing the export (default is current working directory");
+            LOG.log(Level.SEVERE, "  -content <directory>: path to a directory containing the content files (relative to source directory; default is current working directory");
             LOG.log(Level.SEVERE, "  -o <directory>: the directory in which the VEOs are created (default is current working directory)");
             LOG.log(Level.SEVERE, "  -h <hashAlgorithm>: specifies the hash algorithm (default SHA-256)");
             LOG.log(Level.SEVERE, "  -rev: include all revisions of the content (if present)");
@@ -225,6 +228,10 @@ public class TrimProcessV3CSV {
         if (sourceDirectory == null) {
             throw new VEOFatal("You must specify a source directory using the -source command line argument");
         }
+        if (contentDirectory == null) {
+            throw new VEOFatal("You must specify a content directory using the -content command line argument");
+        }
+        contentDirectory = sourceDirectory.resolve(contentDirectory);
         if (supportDir == null) {
             throw new VEOFatal("You must specify a VERS support directory using the -suppoort command line argument");
         }
@@ -234,6 +241,7 @@ public class TrimProcessV3CSV {
 
         // LOG generic things
         LOG.log(Level.SEVERE, "Source directory is ''{0}''", new Object[]{sourceDirectory.toAbsolutePath().toString()});
+        LOG.log(Level.SEVERE, "Content directory is ''{0}''", new Object[]{contentDirectory.toAbsolutePath().toString()});
         LOG.log(Level.SEVERE, "Output directory is ''{0}''", new Object[]{outputDirectory.toAbsolutePath().toString()});
         LOG.log(Level.SEVERE, "Common AGLS metadata & VEOReadme.txt from ''{0}''", new Object[]{templateDir.toAbsolutePath().toString()});
         LOG.log(Level.SEVERE, "Support directory is ''{0}''", new Object[]{supportDir.toAbsolutePath().toString()});
@@ -273,7 +281,7 @@ public class TrimProcessV3CSV {
         int i;
         Path pfxFile;           // PFX file to use for signing. If null, don't sign
         String pfxFilePassword; // Password to unlock PFX file
-        String usage = "trimProcessV3 [-help] -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-ha hashAlg] [-o <directory>] [-a dir]* [-rev] [-source <directory>] (files)*";
+        String usage = "trimProcessV3 [-help] -t <directory> -s <pfxFile> <password> -support <directory> [-v] [-d] [-ha hashAlg] [-o <directory>] [-a dir]* [-rev] [-source <directory>] [-content <directory>] (files)*";
 
         // process command line arguments
         i = 0;
@@ -294,8 +302,8 @@ public class TrimProcessV3CSV {
                         LOG.setLevel(Level.FINE);
                         i++;
                         break;
-                        
-                        // display help?
+
+                    // display help?
                     case "-help":
                         help = true;
                         i++;
@@ -318,21 +326,28 @@ public class TrimProcessV3CSV {
                         i++;
                         break;
 
-                    // '-o' specifies output directory
+                    // '-o' specifies where VEOs are created
                     case "-o":
                         i++;
                         outputDirectory = checkFile("output directory", args[i], true);
                         i++;
                         break;
 
-                    // '-source' specifies output directory
+                    // '-source' specifies directory where data is found
                     case "-source":
                         i++;
                         sourceDirectory = checkFile("source directory", args[i], true);
                         i++;
                         break;
+                        
+                    // '-content' specifies directory where data is found relative to source directory
+                    case "-content":
+                        i++;
+                        contentDirectory = checkFile("content directory", args[i], true);
+                        i++;
+                        break;
 
-                    // '-support' specifies output directory
+                    // '-support' specifies support directory (where the LTSF is defined)
                     case "-support":
                         i++;
                         supportDir = checkFile("support directory", args[i], true);
@@ -658,6 +673,9 @@ public class TrimProcessV3CSV {
                         case "CABINET FILE":
                             te.recordType = "Cabinet File";
                             break;
+                        case "CABINET DOCUMENT":
+                            te.recordType = "Cabinet Document";
+                            break;
                         case "CORPORATE DOCUMENT":
                             te.recordType = "Corporate Document";
                             break;
@@ -672,6 +690,9 @@ public class TrimProcessV3CSV {
                             break;
                         case "MINISTERIAL BRIEFING - VERS":
                             te.recordType = "Ministerial Briefing - VERS";
+                            break;
+                        case "MINISTERIAL BRIEFING":
+                            te.recordType = "Ministerial Briefing";
                             break;
                         case "MINISTERIAL CORRESPONDENCE  - VERS":
                             te.recordType = "Ministerial Correspondence - VERS";
@@ -927,14 +948,14 @@ public class TrimProcessV3CSV {
 
                 // add an information piece with a single content file
                 String veoRef = (recordName.replace('/', '-') + "/" + contents[i]);
-                p = sourceDirectory.resolve(contents[i]);
+                p = contentDirectory.resolve(contents[i]);
                 try {
                     cv.addInformationPiece(null);
                     cv.addContentFile(veoRef, p);
                 } catch (VEOError e) {
                     throw new VEOError("Information Object " + base.name + " is incomplete because: " + e.getMessage());
                 }
-                
+
                 // if the content file wasn't a valid long term preservation
                 // format, add a dummy content file with a .txt content
                 if (!isLTPF(contents[i])) {
@@ -954,7 +975,7 @@ public class TrimProcessV3CSV {
                     cv.addContentFile(veoRef, dummyLTSFCF);
                 }
             }
-            
+
             // find contained entities. All contained entities are assumed to be
             // in the one source directory (hence are in the TRIM entity list)
             // Contained entries are found by looking for entities that have a
