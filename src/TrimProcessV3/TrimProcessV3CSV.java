@@ -123,10 +123,11 @@ public class TrimProcessV3CSV {
      * 20210505 2.0 Updated & generalised to work with current Cabinet transfer
      * 20210709 2.1 Updated to work on PISA with BAT file
      * 20210712 2.2 Improved reporting
+     * 20210714 2.3 Added help option
      * </pre>
      */
     static String version() {
-        return ("2.2");
+        return ("2.3");
     }
 
     /**
@@ -169,6 +170,7 @@ public class TrimProcessV3CSV {
         incRevisions = false;
         exportCount = 0;
         allEntities = new TreeMap<>();
+        help = false;
         r = Runtime.getRuntime();
 
         // variables for processing this XML document
@@ -289,7 +291,12 @@ public class TrimProcessV3CSV {
                     case "-d":
                         debug = true;
                         LOG.setLevel(Level.FINE);
-                        // rootLog.setLevel(Level.FINE);
+                        i++;
+                        break;
+                        
+                        // display help?
+                    case "-help":
+                        help = true;
                         i++;
                         break;
 
