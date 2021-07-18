@@ -38,12 +38,9 @@ package TrimProcessV3;
  * </pre>
  *
  */
-import java.io.*;
-import java.nio.file.*;
 import java.util.TimeZone;
 import java.util.Locale;
 import java.util.Date;
-import java.util.*;
 import java.text.SimpleDateFormat;
 import VEOCreate.CreateVEO;
 import VEOCreate.Fragment;
@@ -52,11 +49,26 @@ import VERSCommon.LTSF;
 import VERSCommon.PFXUser;
 import VERSCommon.VEOError;
 import VERSCommon.VEOFatal;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -142,7 +154,6 @@ public class TrimProcessV3CSV {
 
         SimpleDateFormat sdf;
         TimeZone tz;
-        int i;
 
         // Set up logging
         // System.setProperty("java.util.logging.SimpleFormatter.format", "%4$s: %5$s%n"); with type of Log message
@@ -469,6 +480,7 @@ public class TrimProcessV3CSV {
      * processExports
      *
      * This method processes the list of files or exports
+     * @throws VERSCommon.VEOFatal
      */
     public void processExports() throws VEOFatal {
         int i;
@@ -1201,175 +1213,6 @@ public class TrimProcessV3CSV {
     }
 
     /**
-     * Copy a content file into the VEO content directory
-     *
-     */
-    private Path copyContentFile(TrimEntity base, String srcfn, Path destDir, String destfn) throws VEOError {
-        Path source, destination;
-
-        // get the source of the copy
-        if (srcfn == null || srcfn.equals("")) {
-            throw new VEOError("Copying DOS content file from entity failed as the content file name is null");
-        }
-        source = Paths.get(base.dir.toString(), srcfn);
-        if (!Files.exists(source)) {
-            throw new VEOError("TRIM entity content: '" + source.toString() + "' does not exist");
-        }
-        if (Files.isDirectory(source)) {
-            throw new VEOError("TRIM entity content: '" + source.toString() + "' is a directory not a file");
-        }
-
-        // get the destination directory
-        destination = Paths.get(destDir.toString(), destfn);
-
-        // copy
-        try {
-            Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
-        } catch (IOException ioe) {
-            throw new VEOError("Copying: '" + source.toString() + "' to VEO failed: " + ioe.getMessage());
-        }
-
-        return Paths.get(destfn);
-    }
-
-    /**
-     * Convert a VMBX file into a text file containing the email body and one or
-     * more embedded files
-     */
-    /*
-    private void processVMBXfile(String value) {
-        StringReader sr;    // for breaking value into lines
-        BufferedReader br;
-        PrintWriter fw;     // for writing the email body
-        BufferedWriter bw;
-        FileOutputStream fos1; // for writing Base64 encoded attachments
-        BufferedOutputStream bos1;
-        Path p, p1;
-        String line, fileName;
-        char[] cb;
-        int state;
-
-        // open writer for writing the email body
-        p = Paths.get(contentDirectory.toString(), "final.txt");
-        try {
-            fw = new PrintWriter(p.toString());
-        } catch (IOException fnfe) {
-            LOG.log(Level.WARNING, "Arrgh: Could not create: ''{0}'': {1}", new Object[]{p.toString(), fnfe.getMessage()});
-            return;
-        }
-        bw = new BufferedWriter(fw);
-
-        // open output stream for decoded base64 attachments
-        fos1 = null;
-        bos1 = null;
-
-        // read value line by line
-        sr = new StringReader(value);
-        br = new BufferedReader(sr);
-        state = 0;
-        try {
-            while ((line = br.readLine()) != null) {
-                switch (state) {
-                    case 0: // processing the header until we see the start of a embedded object
-                        fw.println(line);
-                        if (line.startsWith("====Embedded====")) {
-                            fileName = line.substring(17);
-                            fw.println("Embedded file has been extracted to file '" + fileName + "'");
-                            attachments.add(fileName);
-                            p1 = Paths.get(contentDirectory.toString(), fileName);
-                            fos1 = new FileOutputStream(p1.toString());
-                            bos1 = new BufferedOutputStream(fos1);
-                            state = 1;
-                        }
-                        break;
-                    case 1: // seen an embedded line, now processing the Base64 encodings
-                        if (line.startsWith("====Embedded====")) {
-                            if (bos1 != null) {
-                                bos1.close();
-                            }
-                            if (fos1 != null) {
-                                fos1.close();
-                            }
-                            fw.println(line);
-                            fileName = line.substring(17);
-                            fw.println("Embedded file has been extracted to file '" + fileName + "'");
-                            attachments.add(fileName);
-                            p1 = Paths.get(contentDirectory.toString(), fileName);
-                            fos1 = new FileOutputStream(p1.toString());
-                            bos1 = new BufferedOutputStream(fos1);
-                        } else {
-                            cb = line.toCharArray();
-                            b64.fromBase64(cb, 0, cb.length, bos1);
-                        }
-                        break;
-                }
-            }
-            if (bos1 != null) {
-                bos1.close();
-            }
-            if (fos1 != null) {
-                fos1.close();
-            }
-            bw.close();
-            fw.close();
-            sr.close();
-            br.close();
-        } catch (IOException ioe) {
-            LOG.log(Level.WARNING, "Arrgh: IOException when extracting the VMBX file: {0}", new Object[]{ioe.getMessage()});
-        }
-    }
-     */
-    /**
-     * Function to process the TRIM date into an ISO8601 date. The TRIM date has
-     * the format [d]d/mm/yyyy_at_[h]h:mm_[A|P]M Note that the first digit of
-     * the day and the hour is not present if it should be '0'.
-     *
-     * @param date the TRIM date
-     * @return the ISO8601 date
-     */
-    private String processOldDate(String date) {
-        int i, p;
-        String s, year, month, day, hour, min;
-
-        if (date == null) {
-            return null;
-        }
-        if (date.charAt(1) == '/') {
-            day = '0' + date.substring(0, 1);
-            p = 2;
-        } else {
-            day = date.substring(0, 2);
-            p = 3;
-        }
-        if (date.charAt(p + 1) == '/') {
-            month = '0' + date.substring(p, p + 1);
-            p += 2;
-        } else {
-            month = date.substring(p, p + 2);
-            p += 3;
-        }
-        year = date.substring(p, p + 4);
-        if (date.length() < 11) {
-            s = year + "-" + month + "-" + day;
-        } else {
-            if (date.charAt(p + 1) == ':') {
-                i = Integer.parseInt(date.substring(p, p + 1));
-                p += 2;
-            } else {
-                i = Integer.parseInt(date.substring(p, p + 2));
-                p += 3;
-            }
-            if (date.charAt(p + 3) == 'P') {
-                i += 12;
-            }
-            hour = Integer.toString(i);
-            min = date.substring(p, p + 2);
-            s = year + "-" + month + "-" + day + "T" + hour + ":" + min;
-        }
-        return s;
-    }
-
-    /**
      * Function to process the TRIM date into an ISO8601 date. The TRIM date has
      * the format yyyymmddhhmmss. Some or all of the fine time divisions may not
      * be present
@@ -1461,9 +1304,6 @@ public class TrimProcessV3CSV {
         Iterator<String> it;
         boolean anyFound;
         TrimEntity te;
-        ZonedDateTime now = ZonedDateTime.now();
-        DateTimeFormatter dtf;
-        int i;
 
         // Ouput report
         LOG.log(Level.SEVERE, "");
@@ -1471,51 +1311,6 @@ public class TrimProcessV3CSV {
         LOG.log(Level.SEVERE, "Total records (VEOs) created: {0}", new Object[]{exportCount});
         LOG.log(Level.SEVERE, "");
 
-        // output all
-        /*
-        it = allEntities.keySet().iterator();
-        anyFound = false;
-        System.out.println();
-        System.out.println("TRIM Entities:");
-        while (it.hasNext()) {
-            te = allEntities.get(it.next());
-            System.out.println("\t" + te.id + " r:" + te.root + " d:" + te.defined + " e:"+te.exported);
-        }
-         */
-        // Entities that were referenced, but not included in export
-        /* Not used as this export doesn't list children
-        it = allEntities.keySet().iterator();
-        anyFound = false;
-        System.out.println();
-        System.out.println("TRIM Entities referenced as children, but which did not exist as files in export:");
-        while (it.hasNext()) {
-            te = allEntities.get(it.next());
-            if (te.referenced && !te.defined) {
-                System.out.println("\t" + te.id + " in " + te.dir.toString() + " (referenced by " + te.referencedBy.toString() + ")");
-                anyFound = true;
-            }
-        }
-        if (!anyFound) {
-            System.out.println("\tNo entities");
-        }
-        it = allEntities.keySet().iterator();
-        anyFound = false;
-        System.out.println();
-
-        // entities in export that were not part of files
-        System.out.println("TRIM Entities which exist in export, but which are not part of files:");
-        while (it.hasNext()) {
-            te = allEntities.get(it.next());
-            if (te.defined && !(te.root || te.referenced)) {
-                System.out.println("\t" + te.id + " in " + te.dir.toString());
-                anyFound = true;
-            }
-        }
-        if (!anyFound) {
-            System.out.println("\tNo entities");
-        }
-        System.out.println();
-         */
         // Report on root entities
         it = allEntities.keySet().iterator();
         anyFound = false;
@@ -1807,162 +1602,6 @@ public class TrimProcessV3CSV {
         @Override
         public String toString() {
             return type + "/" + year + "/" + seq;
-        }
-    }
-
-    /**
-     * HandleDataFailures
-     *
-     * This class allows the archivist to gracefully handle data failures: 1)
-     * TRIM entities that are missing 2) TRIM entities that are so malformed
-     * they cannot be fixed 3) Data content that has no long term preservation
-     * format
-     *
-     * The core is the problemReport.txt file. If this is present in the output
-     * directory, the contents are read into this class. If a problem is found
-     * with a TRIM entity, the entity is looked up, and if a custom explanation
-     * file is specified, it is read and included in the VEO as the IO.
-     * Otherwise the default explanation is used and the problem is recorded. At
-     * the end of the program, the original problemReport.txt file is replaced.
-     */
-    private class TRIMEntityHandler {
-
-        Path problemReport;     // name and location of the problem report file
-        TreeMap<String, TRIMEntityProblem> problemEntities; // list of problem entities we have seen
-
-        // construct from the problemReport.txt file if it exists
-        public TRIMEntityHandler(Path problemReport) {
-            FileReader fr = null;
-            BufferedReader br = null;
-            String line;
-            String[] tokens;
-            TRIMEntityProblem tep;
-
-            this.problemReport = problemReport;
-            problemEntities = new TreeMap<>();
-
-            // if the problem report exists, open it and read it
-            if (Files.exists(problemReport)) {
-                try {
-                    fr = new FileReader(problemReport.toFile());
-                    br = new BufferedReader(fr);
-                    while ((line = br.readLine()) != null) {
-                        tokens = line.split("\t");
-                        if (tokens.length != 3) {
-                            LOG.log(Level.INFO, "Problem report file ''{0}'' line ''{1}'' does not have three tokens", new Object[]{problemReport.toString(), line});
-                            continue;
-                        }
-                        tep = new TRIMEntityProblem(tokens[0], tokens[1], tokens[2]);
-                        problemEntities.put(tokens[0], tep);
-                    }
-                } catch (FileNotFoundException fnfe) {
-                    LOG.log(Level.INFO, "Problem Report file unexpectedly does not exist", new Object[]{fnfe.getMessage()});
-                } catch (IOException ioe) {
-                    LOG.log(Level.INFO, "Error when reading Problem Report file ''{0}'': ''{1}''", new Object[]{problemReport.toString(), ioe.getMessage()});
-                } finally {
-                    try {
-                        if (br != null) {
-                            br.close();
-                        }
-                    } catch (IOException e) {
-                        /* ignore */
-                    }
-                    try {
-                        if (fr != null) {
-                            fr.close();
-                        }
-                    } catch (IOException e) {
-                        /* ignore */
-                    }
-                }
-            }
-        }
-
-        // Look up a TRIM entity that is having problems...
-        public String lookup(String id, TRIMEntityProblemTypes problemType, String problem) {
-            TRIMEntityProblem tep;
-
-            tep = problemEntities.get(id);
-
-            // if it doesn't exist, remember this problem
-            if (tep == null) {
-                switch (problemType) {
-                    case MISSING:
-                        tep = new TRIMEntityProblem(id, "MissingTRIMEntity.txt", problem);
-                        break;
-                    case MALFORMED:
-                        tep = new TRIMEntityProblem(id, "MalformedTRIMEntity.txt", problem);
-                        break;
-                    case MISSING_LTPF:
-                        tep = new TRIMEntityProblem(id, "NoLTPFInTRIMEntity.txt", problem);
-                        break;
-                    default:
-                        LOG.log(Level.SEVERE, "Undefined problem type in TRIMEntity.lookup");
-                        tep = new TRIMEntityProblem(id, "NoLTPFInTRIMEntity.txt", problem); // wrong, but won't cause a failure
-                }
-                tep.seenNow = true;
-            } else {
-
-            }
-            return tep.file;
-        }
-
-        // write the problem report out
-        public boolean writeReport() {
-            Iterator<String> it;
-            FileWriter fw;
-            BufferedWriter bw;
-            TRIMEntityProblem tep;
-            Path tmp;
-
-            // try to move existing problemReport.txt
-            if (Files.exists(problemReport)) {
-                // tmp = Files.move(problemReport, tmp, cos)
-            }
-            try {
-                fw = new FileWriter(problemReport.toFile());
-                bw = new BufferedWriter(fw);
-
-                it = problemEntities.keySet().iterator();
-                while (it.hasNext()) {
-                    tep = problemEntities.get(it.next());
-                    bw.write(tep.id);
-                    bw.write("\t");
-                    bw.write(tep.file);
-                    bw.write("\t");
-                    bw.write(tep.error);
-                    bw.write("\r\n");
-                }
-                bw.close();
-                fw.close();
-            } catch (IOException ioe) {
-                System.out.println("Error creating error report (AuditReport.txt): " + ioe.getMessage());
-            }
-            return true;
-        }
-    }
-
-    public enum TRIMEntityProblemTypes {
-        MISSING, // TRIM entity is not present in export
-        MALFORMED, // TRIM entity cannot be parsed
-        MISSING_LTPF    // Content has no LTPF
-    };
-
-    /**
-     * Private class recording a TRIM entity problem
-     */
-    private class TRIMEntityProblem {
-
-        String id;      // id of the TRIM Entity
-        String file;    // file containing explanation
-        String error;   // description of error
-        boolean seenNow;  // true if this problem was seen in this run
-
-        public TRIMEntityProblem(String id, String file, String error) {
-            this.id = id;
-            this.file = file;
-            this.error = error;
-            seenNow = false;
         }
     }
 
