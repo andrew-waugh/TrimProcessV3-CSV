@@ -339,7 +339,7 @@ public class TrimProcessV3CSV {
                         sourceDirectory = checkFile("source directory", args[i], true);
                         i++;
                         break;
-                        
+
                     // '-content' specifies directory where data is found relative to source directory
                     case "-content":
                         i++;
@@ -667,6 +667,7 @@ public class TrimProcessV3CSV {
                     }
                     te.title = tokens[titleCol];
                     te.dateCreated = tokens[dateCreatedCol];
+                    te.contentFile = tokens[docFileCol];
                     te.dateRegistered = tokens[dateRegisteredCol];
                     te.classification = tokens[classificationCol];
                     switch (tokens[recordTypeCol]) {
@@ -933,13 +934,13 @@ public class TrimProcessV3CSV {
             cv.addMetadataPackage("http://prov.vic.gov.au/vers/schema/TRIM", "https://www.w3.org/TR/2008/REC-xml-20081126/", makeTrimMetadata(base));
 
             // add final version of record and any encodings (renditions in TRIM speak)
-            if (base.tokens[docFileCol] != null && !base.tokens[docFileCol].equals("")) {
+            if (base.contentFile != null && !base.contentFile.equals("")) {
 
                 // get the content files for this TRIM entity. There will be two
                 // file names, separated by a '|'. The first is the internal TRIM
                 // file name, the second appears to be the original file name.
                 // We use the second one...
-                contents = base.tokens[docFileCol].replace('|', '\t').split("\t");
+                contents = base.contentFile.replace('|', '\t').split("\t");
                 if (contents.length == 2) {
                     i = 1;
                 } else {
@@ -1707,6 +1708,7 @@ public class TrimProcessV3CSV {
         String classification;
         String recordType;
         String retentionSchedule;
+        String contentFile;
 
         public TrimEntity(String id, String[] tokens, Path dir) throws Error {
             StringBuilder sb;
@@ -1740,6 +1742,7 @@ public class TrimProcessV3CSV {
             classification = null;
             recordType = null;
             retentionSchedule = null;
+            contentFile = null;
         }
 
         @Override
